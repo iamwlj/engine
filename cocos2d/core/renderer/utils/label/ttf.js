@@ -76,6 +76,9 @@ let _drawUnderlineWidth = 0;
 
 let _sharedLabelData;
 
+let _ansiStyles = null;
+let _maxWidth = 0;
+
 module.exports = {
 
     _getAssemblerData () {
@@ -171,6 +174,9 @@ module.exports = {
         _enableItalic = comp._isItalic;
         _enableUnderline = comp._isUnderline;
 
+        _ansiStyles = comp._ansiStyles;
+        _maxWidth = comp._maxWidth || 0;
+
         if (_overflow === Overflow.NONE) {
             _isWrapText = false;
         }
@@ -247,7 +253,7 @@ module.exports = {
         _context.fillRect(_drawUnderlinePos.x, _drawUnderlinePos.y, underlinewidth, _underlineThickness);
     },
 
-    _updateTexture () {
+    _updateTextureOld () {
         _context.clearRect(0, 0, _canvas.width, _canvas.height);
         //Add a white background to avoid black edges.
         //TODO: it is best to add alphaTest to filter out the background color.
@@ -327,6 +333,141 @@ module.exports = {
         _texture.handleLoadedTexture();
     },
 
+    _updateTexture () {
+        if (_ansiStyles) {
+            this._updateTextureNew()
+        } else {
+            this._updateTextureOld()
+        }
+    },
+
+    _updateTextureNew () {
+        _context.clearRect(0, 0, _canvas.width, _canvas.height);
+        //Add a white background to avoid black edges.
+        //TODO: it is best to add alphaTest to filter out the background color.
+        let _fillColor = _outlineComp ? _outlineColor : _color;
+        _context.fillStyle = `rgba(${_fillColor.r}, ${_fillColor.g}, ${_fillColor.b}, ${_invisibleAlpha})`;
+        let bgStyle = _context.fillStyle;
+        _context.fillRect(0, 0, _canvas.width, _canvas.height);
+        _context.font = _fontDesc;
+
+        let startPosition = this._calculateFillTextStartPosition();
+        let lineHeight = this._getLineHeight();
+        //use round for line join to avoid sharp intersect point
+        _context.lineJoin = 'round';
+        _context.fillStyle = `rgba(${_color.r}, ${_color.g}, ${_color.b}, 1)`;
+
+        let fgStyle = _context.fillStyle;
+
+        let isMultiple = _splitedStrings.length > 1;
+
+        //do real rendering
+        let measureText = this._measureText(_context);
+
+        let drawTextPosX = 0, drawTextPosY = 0;
+
+        let measureWidthTxt = this._measureWidthTxt(_context, _maxWidth);
+
+        // only one set shadow and outline
+        if (_shadowComp) {
+            this._setupShadow();
+        }
+        if (_outlineComp) {
+            this._setupOutline();
+        }
+
+        let isUnderline = false;
+        drawTextPosX = startPosition.x;
+        drawTextPosY = startPosition.y;
+        // draw shadow and (outline or text)
+        for (let i = 0; i < _ansiStyles.length; ++i) {
+            let style = _ansiStyles[i]
+            switch(style.t) {
+                case 'n':
+                    drawTextPosY += lineHeight;
+                    drawTextPosX = startPosition.x;
+                    break;
+                case 't': {
+                        let w = measureText(style.v);
+                        if (_maxWidth && w + drawTextPosX > _maxWidth) {
+                            let txt = style.v;
+                            let underlineStart = drawTextPosX;
+                            do {
+                                let res = measureWidthTxt(txt, drawTextPosX)
+                                if (res.newline === false) {
+                                    _context.fillStyle = bgStyle;
+                                    _context.fillRect(drawTextPosX, drawTextPosY, res.width, lineHeight);
+                                    _context.fillStyle = fgStyle;
+                                    _context.fillText(res.txt, drawTextPosX, drawTextPosY);
+                                    drawTextPosX += res.width;
+
+                                    if (isUnderline) {
+                                        _drawUnderlineWidth = drawTextPosX - underlineStart;
+                                        _drawUnderlinePos.x = underlineStart;
+                                        _drawUnderlinePos.y = drawTextPosY;
+                                        this._drawUnderline(_drawUnderlineWidth);
+                                    }
+                                    break;
+                                } else {
+                                    if (res.txt !== '') {
+                                        _context.fillStyle = bgStyle;
+                                        _context.fillRect(drawTextPosX, drawTextPosY, res.width, lineHeight);
+                                        _context.fillStyle = fgStyle;
+                                        _context.fillText(res.txt, drawTextPosX, drawTextPosY);
+                                        drawTextPosX += res.width;
+                                    }
+                                    txt = res.left;
+
+                                    // newline
+                                    if (isUnderline) {
+                                        _drawUnderlineWidth = drawTextPosX - underlineStart;
+                                        _drawUnderlinePos.x = underlineStart;
+                                        _drawUnderlinePos.y = drawTextPosY;
+                                        this._drawUnderline(_drawUnderlineWidth);
+                                        underlineStart = startPosition.x;
+                                    }
+
+                                    drawTextPosY += lineHeight;
+                                    drawTextPosX = startPosition.x;
+                                }
+                            } while (true);
+                        } else {
+                            _context.fillStyle = bgStyle;
+                            _context.fillRect(drawTextPosX, drawTextPosY, w, lineHeight);
+                            _context.fillStyle = fgStyle;
+                            _context.fillText(style.v, drawTextPosX, drawTextPosY);
+
+                            if (isUnderline) {
+                                _drawUnderlineWidth = w;
+                                _drawUnderlinePos.x = drawTextPosX;
+                                _drawUnderlinePos.y = drawTextPosY;
+                                this._drawUnderline(_drawUnderlineWidth);
+                            }
+                            drawTextPosX += w;
+                        }
+                    }
+                    break;
+                case 'bg':
+                    bgStyle = style.v;
+                    break;
+                case 'fg':
+                    fgStyle = style.v;
+                    break;
+                case 'u':
+                    isUnderline = style.v;
+                default:
+                    break;
+            }
+
+        }
+
+        if (_shadowComp) {
+            _context.shadowColor = 'transparent';
+        }
+
+        _texture.handleLoadedTexture();
+    },
+
     _calDynamicAtlas (comp) {
         if(comp.cacheMode !== Label.CacheMode.BITMAP) return;
         let frame = comp._frame;
@@ -352,11 +493,25 @@ module.exports = {
             _splitedStrings = paragraphedStrings;
             let canvasSizeX = 0;
             let canvasSizeY = 0;
-            for (let i = 0; i < paragraphedStrings.length; ++i) {
-                let paraLength = textUtils.safeMeasureText(_context, paragraphedStrings[i]);
-                canvasSizeX = canvasSizeX > paraLength ? canvasSizeX : paraLength;
+
+            if (_maxWidth && _ansiStyles) {
+                var extraHeight = 0;
+                for (let i = 0; i < paragraphedStrings.length; ++i) {
+                    let paraLength = textUtils.safeMeasureText(_context, paragraphedStrings[i]);
+                    if (paraLength > _maxWidth) {
+                        extraHeight += (Math.ceil(paraLength/_maxWidth) - 1);
+                        paraLength = _maxWidth;
+                    }
+                    canvasSizeX = canvasSizeX > paraLength ? canvasSizeX : paraLength;
+                }
+                canvasSizeY = (_splitedStrings.length + extraHeight + textUtils.BASELINE_RATIO) * this._getLineHeight();
+            } else {
+                for (let i = 0; i < paragraphedStrings.length; ++i) {
+                    let paraLength = textUtils.safeMeasureText(_context, paragraphedStrings[i]);
+                    canvasSizeX = canvasSizeX > paraLength ? canvasSizeX : paraLength;
+                }
+                canvasSizeY = (_splitedStrings.length + textUtils.BASELINE_RATIO) * this._getLineHeight();
             }
-            canvasSizeY = (_splitedStrings.length + textUtils.BASELINE_RATIO) * this._getLineHeight();
             let rawWidth = parseFloat(canvasSizeX.toFixed(2));
             let rawHeight = parseFloat(canvasSizeY.toFixed(2));
             _canvasSize.width = rawWidth + _canvasPadding.width;
@@ -453,6 +608,42 @@ module.exports = {
         return function (string) {
             return textUtils.safeMeasureText(ctx, string);
         };
+    },
+
+    _measureWidthTxt(context, max_width) {
+        return function(txt, x) {
+            var width = max_width - x;
+            var w = textUtils.safeMeasureText(context, txt);
+            if (w <= width) {
+                return {left:'', txt:txt, newline:false, width:w};
+            }
+            var from = 0;
+            var to = txt.length;
+            var end = to;
+            var left = txt;
+            var idx = Math.floor((from+to)/2);
+            var res;
+            do {
+                res = txt.substring(0, idx);
+                w = textUtils.safeMeasureText(context, res);
+                if (w <= width) {
+                    if (textUtils.safeMeasureText(context, txt.substring(0, idx+1)) > width) {
+                        return {left: txt.substring(idx), txt: res, width: w, newline: true};
+                    } else {
+                        from = idx;
+                    }
+                } else {
+                    to = idx;
+                }
+                let idx0 = Math.floor((from+to)/2);
+                if (idx0 == 0) {
+                    return {left: txt, txt: '', newline: true, width:0};
+                } else if (idx0 == idx) {
+                    return {left: txt.substring(idx), txt: res, width: w, newline: true};
+                }
+                idx = idx0;
+            } while (true)
+        }
     },
 
     _calculateLabelFont () {
