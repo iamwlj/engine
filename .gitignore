@@ -3,6 +3,7 @@
 /web.config
 .idea
 .DS_Store
+package-lock.json
 build
 aspnet_client
 node_modules
