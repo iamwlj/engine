@@ -607,7 +607,7 @@ export default class TTFAssembler extends Assembler2D {
         return function (string) {
             return textUtils.safeMeasureText(ctx, string);
         };
-
+    }
     // wlj add
     _measureWidthTxt(context, max_width) {
         return function(txt, x) {
