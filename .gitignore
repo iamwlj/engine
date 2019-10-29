@@ -4,6 +4,7 @@
 .idea
 .DS_Store
 package-lock.json
+package.json
 build
 aspnet_client
 node_modules
