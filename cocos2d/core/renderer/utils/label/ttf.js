@@ -92,7 +92,7 @@ export default class TTFAssembler extends Assembler2D {
 
     updateRenderData (comp) {
         super.updateRenderData(comp);
-        
+
         if (!comp._vertsDirty) return;
 
         this._updateFontFamily(comp);
@@ -250,6 +250,94 @@ export default class TTFAssembler extends Assembler2D {
     }
 
     _updateTexture () {
+        _context.clearRect(0, 0, _canvas.width, _canvas.height);
+        //Add a white background to avoid black edges.
+        //TODO: it is best to add alphaTest to filter out the background color.
+        let _fillColor = _outlineComp ? _outlineColor : _color;
+        _context.fillStyle = `rgba(${_fillColor.r}, ${_fillColor.g}, ${_fillColor.b}, ${_invisibleAlpha})`;
+        _context.fillRect(0, 0, _canvas.width, _canvas.height);
+        _context.font = _fontDesc;
+
+        let startPosition = this._calculateFillTextStartPosition();
+        let lineHeight = this._getLineHeight();
+        //use round for line join to avoid sharp intersect point
+        _context.lineJoin = 'round';
+        _context.fillStyle = `rgba(${_color.r}, ${_color.g}, ${_color.b}, 1)`;
+
+        let isMultiple = _splitedStrings.length > 1;
+
+        //do real rendering
+        let measureText = this._measureText(_context);
+
+        let drawTextPosX = 0, drawTextPosY = 0;
+
+        // only one set shadow and outline
+        if (_shadowComp) {
+            this._setupShadow();
+        }
+        if (_outlineComp) {
+            this._setupOutline();
+        }
+
+        if ((_shadowComp && isMultiple) || _enableUnderline) {
+            // draw shadow and (outline or text)
+            drawTextPosX = startPosition.x;
+            drawTextPosY = startPosition.y;
+            for (let i = 0; i < _splitedStrings.length; ++i) {
+                // drawTextPosY = startPosition.y + i * lineHeight;
+                if (_shadowComp) {
+                    // multiple lines need to be drawn outline and fill text
+                    if (isMultiple) {
+                        if (_outlineComp) {
+                            _context.strokeText(_splitedStrings[i], drawTextPosX, drawTextPosY);
+                        }
+                        _context.fillText(_splitedStrings[i], drawTextPosX, drawTextPosY);
+                    }
+                }
+
+                // draw underline
+                // if (_enableUnderline) {
+                else {
+                    _drawUnderlineWidth = measureText(_splitedStrings[i]);
+                    if (_hAlign === macro.TextAlignment.RIGHT) {
+                        _drawUnderlinePos.x = startPosition.x - _drawUnderlineWidth;
+                    } else if (_hAlign === macro.TextAlignment.CENTER) {
+                        _drawUnderlinePos.x = startPosition.x - (_drawUnderlineWidth / 2);
+                    } else {
+                        _drawUnderlinePos.x = startPosition.x;
+                    }
+                    _drawUnderlinePos.y = drawTextPosY;
+                    this._drawUnderline(_drawUnderlineWidth);
+                }
+                drawTextPosY += lineHeight;
+            }
+        }
+
+        if (_shadowComp && isMultiple) {
+            _context.shadowColor = 'transparent';
+        }
+
+        // draw text and outline
+        drawTextPosX = startPosition.x;
+        drawTextPosY = startPosition.y;
+        for (let i = 0; i < _splitedStrings.length; ++i) {
+            // drawTextPosX = startPosition.x;
+            // drawTextPosY = startPosition.y + i * lineHeight;
+            if (_outlineComp) {
+                _context.strokeText(_splitedStrings[i], drawTextPosX, drawTextPosY);
+            }
+            _context.fillText(_splitedStrings[i], drawTextPosX, drawTextPosY);
+            drawTextPosY += lineHeight;
+        }
+
+        if (_shadowComp) {
+            _context.shadowColor = 'transparent';
+        }
+
+        _texture.handleLoadedTexture();
+    }
+
+    _updateTexture0 () {
         _context.clearRect(0, 0, _canvas.width, _canvas.height);
         //Add a white background to avoid black edges.
         //TODO: it is best to add alphaTest to filter out the background color.
